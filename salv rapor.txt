@@ -1,0 +1,218 @@
+*&---------------------------------------------------------------------*
+*& Report ZVESA_E00027_P095
+*&---------------------------------------------------------------------*
+*&
+*&---------------------------------------------------------------------*
+report zvesa_e00027_p095.
+
+tables : pernr .
+infotypes : 0001 , 0008 ,0770.
+
+data: begin of gs_out,
+        pernr like p0001-pernr,
+        ename like p0001-ename,
+        plans like p0001-plans,
+        pltxt like hrp1000-stext,
+        begda like p0001-begda,
+        endda like p0001-endda,
+        aedtm like p0001-aedtm,
+        bet01 like p0008-bet01,
+        merni like p0770-merni,
+        t_color TYPE lvc_t_scol,
+
+      end of gs_out.
+
+data: gt_out like table of gs_out.
+
+data: gt_hrp1000 type table of hrp1000.
+data: go_salv type ref to cl_salv_table.
+data: gr_events TYPE REF TO cl_salv_events_table.
+
+class vesa definition.
+  public section.
+     methods:
+      dbclick for EVENT double_click of cl_salv_events_table
+      IMPORTING row column,
+      set_init,
+      set_initial,
+      get_data,
+      set_data,
+      tool,
+      lt_sl,
+      sum,
+      color,
+      zbr,
+      show,
+      display.
+
+endclass.
+data : gcl_vesa type ref to vesa.
+data: event_handler TYPE REF TO vesa.
+
+class vesa implementation.
+
+  method set_init.
+  endmethod.
+
+  method set_initial.
+    pnpbegda = pn-begps = pnpbegps = pn-begmc = pn-begda .
+    pnpendda = pn-endps = pnpendps = pn-endmc = pn-endda .
+  endmethod.
+
+  method get_data.
+    clear gt_hrp1000[].
+    select * from hrp1000 into table gt_hrp1000.
+  endmethod.
+
+ METHOD color.
+   LOOP AT gt_out ASSIGNING FIELD-SYMBOL(<s_data>) WHERE pernr BETWEEN 100 and 400.
+     APPEND VALUE  #(
+    fname = 'PERNR'
+    color-col = col_positive
+    color-int = 1 "'Intensified' off
+    color-inv = 6"' Inverse' off
+ ) TO  <s_data>-t_color.
+
+
+ENDLOOP.
+
+LOOP AT gt_out ASSIGNING <s_data> WHERE pernr < 200.
+  "Don't specify a field name in order to apply a color to a whole row
+  APPEND VALUE #( color-col = col_negative ) TO  <s_data>-t_color.
+ENDLOOP.
+DATA(lo_column_tab) = CAST cl_salv_column_table(
+  go_salv->get_columns( )->get_column( 'BET01' ) ).
+
+"It's not possible to change the column color of key fields,
+"so unregister the column as key field when needed
+lo_column_tab->set_key( abap_false ).
+
+lo_column_tab->set_color( VALUE #( col = col_total ) ).
+
+
+go_salv->get_columns( )->set_color_column( 'T_COLOR' ).
+
+   endmethod.
+  method set_data.
+
+    clear gs_out.
+
+    gs_out-pernr = p0001-pernr.
+    gs_out-ename = p0001-ename.
+    gs_out-begda = p0001-begda.
+    gs_out-endda = p0001-endda.
+    gs_out-aedtm = p0001-aedtm.
+    gs_out-merni = p0770-merni.
+    gs_out-bet01 = p0008-bet01.
+
+*    LOOP AT p0001 INTO p0001 WHERE endda <> '99991231'.
+    gs_out-plans = p0001-plans.
+*    ENDLOOP.
+
+    read table gt_hrp1000 into data(s_hrp) with key objid = gs_out-plans.
+    check sy-subrc eq 0 .
+    gs_out-pltxt = s_hrp-stext.
+
+    append gs_out to gt_out.
+  endmethod.
+ METHOD dbclick.
+   CHECK row eq '2'.
+   IF column eq 'PERNR' .
+  MESSAGE 'CLİCKED' TYPE 'I'.
+   ENDIF.
+   endmethod.
+
+
+  method show.
+    cl_salv_table=>factory(
+
+      importing
+        r_salv_table   = go_salv                           " Basis Class Simple ALV Tables
+      changing
+        t_table        = gt_out
+    ).
+*    catch cx_salv_msg. " ALV: General Error Class with Message
+
+  set PF-STATUS 'STANDARD'.
+  go_salv->set_screen_status(
+    exporting
+      report        = sy-repid
+      pfstatus      =  'STANDARD'
+      set_functions = go_salv->c_functions_all
+  ).
+  endmethod.
+  method tool.
+    data : gr_tool type ref to cl_salv_functions.
+
+    gr_tool  = go_salv->get_functions( ).
+    gr_tool->set_all(
+        value = if_salv_c_bool_sap=>true
+    ).
+
+  endmethod.
+  method sum.
+    data : gv_agg type ref to cl_salv_aggregations.
+    gv_agg = go_salv->get_aggregations( ).
+    try.
+        call method gv_agg->add_aggregation
+          exporting
+            columnname  = 'BET01'
+            aggregation = if_salv_c_aggregation=>total.
+      catch cx_salv_data_error.
+      catch cx_salv_not_found .                         "#EC NO_HANDLER
+      catch cx_salv_existing .                          "#EC NO_HANDLER
+    endtry.
+
+  endmethod.
+  METHOD lt_sl.
+   DATA(lo_selections) = go_salv->get_selections( ).
+lo_selections->set_selection_mode( if_salv_c_selection_mode=>multiple ).
+
+    endmethod.
+  method zbr.
+    data lo_cols type ref to cl_salv_columns.
+    data lo_col  type ref to cl_salv_column.
+
+    data lo_display type ref to cl_salv_display_settings.
+    lo_display = go_salv->get_display_settings( ).
+    lo_display->set_striped_pattern( 'X' ).
+
+    lo_cols = go_salv->get_columns( ).
+    lo_cols->set_optimize( value = 'X' ).
+
+  endmethod.
+  method display.
+
+        gr_events = go_salv->get_event( ).
+    create OBJECT event_handler.
+    set handler event_handler->dbclick for gr_events.
+
+    go_salv->display( ).
+  endmethod.
+
+endclass.
+
+load-of-program.
+  create object gcl_vesa.
+
+initialization.
+  gcl_vesa->set_init( ).
+
+start-of-selection.
+  gcl_vesa->set_initial( ).
+  gcl_vesa->get_data( ).
+
+  rp-set-data-interval p0001 pn-begda pn-endda.
+
+get pernr.
+
+  gcl_vesa->set_data( ).
+
+end-of-selection.
+  gcl_vesa->show( ).
+  gcl_vesa->sum( ).
+  gcl_vesa->tool( ).
+  gcl_vesa->lt_sl( ).
+  gcl_vesa->color( ).
+  gcl_vesa->zbr( ).
+  gcl_vesa->display( ).
